@@ -19,13 +19,25 @@ References:
    - http://en.wikipedia.org/wiki/JSON
    - https://developer.mozilla.org/en-US/docs/JSON
    - https://developer.mozilla.org/en-US/docs/JSON#JSON_in_Firefox_2
+
+ + restler.js
+   - https://github.com/danwrong/restler
+
 */
 
 var fs = require('fs');
 var program = require('commander');
 var cheerio = require('cheerio');
+var rest = require('restler');
 var HTMLFILE_DEFAULT = "index.html";
 var CHECKSFILE_DEFAULT = "checks.json";
+
+var html = "";
+
+var assertURL = function(url) {
+    var url = url.toString();	
+	rest.get(url).on('complete', setHtml);
+}
 
 var assertFileExists = function(infile) {
     var instr = infile.toString();
@@ -36,16 +48,16 @@ var assertFileExists = function(infile) {
     return instr;
 };
 
-var cheerioHtmlFile = function(htmlfile) {
-    return cheerio.load(fs.readFileSync(htmlfile));
-};
-
 var loadChecks = function(checksfile) {
     return JSON.parse(fs.readFileSync(checksfile));
 };
 
-var checkHtmlFile = function(htmlfile, checksfile) {
-    $ = cheerioHtmlFile(htmlfile);
+var checkHtmlFile = function(htmlFile, checksfile) {
+	checkHtml(fs.readFileSync(htmlFile), checksfile);
+};
+
+var checkHtml = function(html, checksfile) {
+   $ = cheerio.load(html);
     var checks = loadChecks(checksfile).sort();
     var out = {};
     for(var ii in checks) {
@@ -61,14 +73,37 @@ var clone = function(fn) {
     return fn.bind({});
 };
 
+var checkAndOutput = function (html, checks) {
+	var checkJson = checkHtml(html, checks);
+	var outJson = JSON.stringify(checkJson, null, 4);
+	console.log(outJson);
+}
+
 if(require.main == module) {
+// needs to be local to have access to program.checks!
+// needs to call checkAndOutput after it finishes. This cannot go to the main loop since the main loop
+// executes before the setHtml is called by on complete.
+//
+	var setHtml = function(result, response) {
+		if (result instanceof Error) {
+		    console.error('Error: ' + result.message);
+			process.exit(1);
+		} else {
+			html = result;
+			checkAndOutput(html, program.checks);
+		}
+	};
+
     program
         .option('-c, --checks <check_file>', 'Path to checks.json', clone(assertFileExists), CHECKSFILE_DEFAULT)
         .option('-f, --file <html_file>', 'Path to index.html', clone(assertFileExists), HTMLFILE_DEFAULT)
+        .option('-u, --url <url>', 'URL to index.html', clone(assertURL))
         .parse(process.argv);
-    var checkJson = checkHtmlFile(program.file, program.checks);
-    var outJson = JSON.stringify(checkJson, null, 4);
-    console.log(outJson);
+	if (! program.url) { 
+		html = fs.readFileSync(program.file); 
+		checkAndOutput(html, program.checks);
+	}   
+
 } else {
     exports.checkHtmlFile = checkHtmlFile;
 }
